@@ -1,0 +1,4 @@
+/etc/udev/rules.d/10-elite.rules
+SYSFS{idVendor}=="04d8", SYSFS{idProduct}=="000a", RUN+="/sbin/modprobe -q ftdi_sio vendor=0x04d8 product=0x000a"
+sudo apt-get install python3-serial python3-websockets python3-dotenv python3-netifaces
+python3 socket-server.py

@@ -145,7 +145,7 @@ def generate_function_table():
     # Special case for Function 0 (F0) in Group 0
     function_table.append([0, 0x20, 0x10])
     # Group 0 (F0-F4)
-    function_table.extend([[0, 0x20, 1 << i] for i in range(3)])
+    function_table.extend([[0, 0x20, 1 << i] for i in range(4)])
     # Group 1 (F5-F8)
     function_table.extend([[1, 0x21, 1 << i] for i in range(4)])
     # Group 2 (F9-F12)
