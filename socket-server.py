@@ -26,7 +26,7 @@ class RealHornbyController:
             self.trains = {}
             self.accessories = {}
         except ImportError:
-            raise ImportError("Hornby library not installed. Please install it to use the real controller.")
+            raise ImportError("xpressNet library not installed. Please install it to use the real controller.")
 
     def get_train(self, train_number):
         if train_number not in self.trains:
@@ -42,6 +42,11 @@ class RealHornbyController:
         # Control the train throttle
         train = self.get_train(train_number)
         train.throttle(speed, direction)
+
+    def stop(self, train_number):
+        # Control the train throttle
+        train = self.get_train(train_number)
+        train.stop()
 
     def function(self, train_number, function_id, switch):
         # Control the train function
@@ -63,10 +68,25 @@ class MockHornbyController:
         self.trains = {}
         self.accessories = {}
 
+    def get_train(self, train_number):
+        if train_number not in self.trains:
+            self.trains[train_number] = {'speed': 0, 'direction': xpressNet.FORWARD}
+        return self.trains[train_number]
+
     def throttle(self, train_number, speed, direction):
         # Simulate throttle control (update mock state)
         print(f"Mock Throttle: Train {train_number}, Speed {speed}, Direction {direction}")
         self.trains[train_number] = {'speed': speed, 'direction': direction}
+
+    def stop(self, train_number):
+        # Simulate stop (update mock state)
+        print(f"Mock Stop: Train {train_number}")
+        if train_number in self.trains:
+            # Keep the direction the same but set the speed to 0
+            self.trains[train_number]['speed'] = 0
+        else:
+            # If the train is not in the state, assume default direction and stop
+            self.trains[train_number] = {'speed': 0, 'direction': xpressNet.FORWARD}
 
     def function(self, train_number, function_id, switch):
         # Simulate function control (update mock state)
@@ -164,6 +184,30 @@ async def websocket_handler(websocket, path):
                     'action': 'throttle',
                     'train_number': train_number,
                     'speed': speed,
+                    'direction': direction
+                })
+
+            elif action == 'stop':
+                train_number = data['train_number']
+                print(f'Stop: Train: {train_number}')
+
+                # Retrieve the current direction from train_state or default to FORWARD if not present
+                if train_number in train_state:
+                    direction = train_state[train_number]['direction']
+                else:
+                    direction = xpressNet.FORWARD  # Default direction
+
+                # Send stop command to the controller
+                controller.stop(train_number)
+
+                # Update the train state with speed set to 0 but keep the direction
+                train_state[train_number] = {'speed': 0, 'direction': direction}
+
+                # Broadcast the throttle update to all connected clients with speed set to 0
+                await broadcast_message({
+                    'action': 'throttle',
+                    'train_number': train_number,
+                    'speed': 0,
                     'direction': direction
                 })
 

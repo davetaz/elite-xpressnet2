@@ -99,6 +99,16 @@ def process_data():
                 message = "Track power off"
             elif chunk[:3] == b'\x61\x00\x60':
                 message = "Normal operations resumed"
+            elif chunk[:3] == b'\x81\x00\x81':
+                message = "Emergency off"
+            elif chunk[:3] == b'\x61\x02\x63':
+                message = "In service mode"
+            elif chunk[:2] == b'\x61\x80':
+                message = "Transmission error"
+            elif chunk[:2] == b'\x61\x81':
+                message = "Command station busy"
+            elif chunk[:2] == b'\x61\x81':
+                message = "Command not supported"
             else:
                 message = f"Unknown data: {to_hex(chunk)}"
 
@@ -170,6 +180,20 @@ class Train:
             message[4] |= 0x80
         elif direction == REVERSE:
             message[4] &= 0x7F
+
+        # Calculate the XOR byte (checksum) using the global function
+        xor_byte = calculate_checksum(message)
+        message.append(xor_byte)
+
+        send(message)
+
+    def stop(self):
+        message = bytearray(b'\x92\x00\x00')
+        struct.pack_into(">H", message, 1, self.address)
+
+        # Calculate the XOR byte (checksum) using the global function
+        xor_byte = calculate_checksum(message)
+        message.append(xor_byte)
 
         send(message)
 
