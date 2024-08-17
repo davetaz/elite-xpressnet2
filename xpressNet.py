@@ -23,6 +23,9 @@ callback = None
 
 function_table = []
 
+# Global dictionary to store active Train instances
+train_instances = {}
+
 # Calculate checksum
 def calculate_checksum(data):
     return reduce(lambda r, v: r ^ v, data)
@@ -61,10 +64,7 @@ def receive():
                     logging.error(f"OSError during reception: {e}")
                     listening = False
 
-import json
-import struct
-
-def decode_loco_address(high_byte, low_byte):
+def decode_train_number(high_byte, low_byte):
     if high_byte < 0xC0:  # Addresses less than 100
         return low_byte
     else:  # Addresses from 100 to 9999
@@ -72,7 +72,7 @@ def decode_loco_address(high_byte, low_byte):
 
 # Process received data
 def process_data():
-    global buffer
+    global buffer, train_instances
     while len(buffer) > 0:
         header_byte = buffer[0]
         chunk_size = (header_byte & 0x0F) + 2  # Calculate chunk size from the last nibble + 2 (header + data bytes)
@@ -88,51 +88,62 @@ def process_data():
 
             # Handle Loco Status Message (Function and Speed/Direction)
             if chunk[0] == 0xE5 and len(chunk) >= 7:
-                print()
                 identification_byte = chunk[1]
 
-                # Extract Loco Address
-                loco_address = decode_loco_address(chunk[2], chunk[3])
+                # Extract Train Number
+                train_number = decode_train_number(chunk[2], chunk[3])
+
+                # Ensure the train instance exists
+                if train_number not in train_instances:
+                    train_instances[train_number] = Train(train_number)
+
+                train = train_instances[train_number]
 
                 if identification_byte == 0xF9:
                     # Function message
                     response["message"] = "Loco Function Status"
-                    response["data"]["loco_address"] = loco_address
-
-                    # Decode Function Group 1 and Group 2 states
-                    function_group_1 = chunk[4]
-                    function_group_2 = chunk[5]
+                    response["action"] = "function"
+                    response["data"]["train_number"] = train_number
 
                     # Decode Function Group 1 (F0-F4) and Function Group 2 (F5-F12)
                     function_group_1 = chunk[4]
                     function_group_2 = chunk[5]
 
-                    response["data"]["functions"] = {
-                        "F0": bool(function_group_1 & 0x10),
-                        "F1": bool(function_group_1 & 0x01),
-                        "F2": bool(function_group_1 & 0x02),
-                        "F3": bool(function_group_1 & 0x04),
-                        "F4": bool(function_group_1 & 0x08),
-                        "F5": bool(function_group_2 & 0x01),
-                        "F6": bool(function_group_2 & 0x02),
-                        "F7": bool(function_group_2 & 0x04),
-                        "F8": bool(function_group_2 & 0x08),
-                        "F9": bool(function_group_2 & 0x10),
-                        "F10": bool(function_group_2 & 0x20),
-                        "F11": bool(function_group_2 & 0x40),
-                        "F12": bool(function_group_2 & 0x80),
+                    functions = {
+                        "0": bool(function_group_1 & 0x10),
+                        "1": bool(function_group_1 & 0x01),
+                        "2": bool(function_group_1 & 0x02),
+                        "3": bool(function_group_1 & 0x04),
+                        "4": bool(function_group_1 & 0x08),
+                        "5": bool(function_group_2 & 0x01),
+                        "6": bool(function_group_2 & 0x02),
+                        "7": bool(function_group_2 & 0x04),
+                        "8": bool(function_group_2 & 0x08),
+                        "9": bool(function_group_2 & 0x10),
+                        "10": bool(function_group_2 & 0x20),
+                        "11": bool(function_group_2 & 0x40),
+                        "12": bool(function_group_2 & 0x80),
                     }
+
+                    response["data"]["functions"] = functions
+
+                    # Update train state
+                    train.update_functions(functions)
 
                 elif identification_byte == 0xF8:
                     # Speed and direction message
                     response["message"] = "Loco Speed/Direction Status"
-                    response["data"]["loco_address"] = loco_address
+                    response["action"] = "throttle"
+                    response["data"]["train_number"] = train_number
                     speed_direction_byte = chunk[5]
-                    direction = "Forward" if speed_direction_byte < 0x80 else "Reverse"
+                    direction = FORWARD if speed_direction_byte < 0x80 else REVERSE
                     speed = speed_direction_byte & 0x7F  # Extract the lower 7 bits for speed (0-127)
 
-                    response["data"]["direction"] = direction
+                    response["data"]["direction"] = "Forward" if direction == FORWARD else "Reverse"
                     response["data"]["speed"] = speed
+
+                    # Update train state
+                    train.update_throttle(speed, direction)
 
             # Handle Command Station Status Response (200 OK)
             elif chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
@@ -173,7 +184,7 @@ def process_data():
                 response["status_code"] = 500  # Server Error
                 response["message"] = "Track power off"
 
-            elif chunk[:3] == b'\x61\x00\x61':
+            elif chunk[:3] == b'\x61\x00\x60':
                 response["status_code"] = 100  # Continue
                 response["message"] = "Normal operations resumed"
 
@@ -184,6 +195,10 @@ def process_data():
             elif chunk[:3] == b'\x61\x02\x63':
                 response["status_code"] = 503  # Service Unavailable
                 response["message"] = "In service mode"
+
+            elif chunk[:3] == b'\x01\x04\x05':
+                response["status_code"] = 200  # Server Error
+                response["message"] = "Command OK"
 
             elif chunk[:2] == b'\x61\x80':
                 response["status_code"] = 400  # Bad Request
@@ -261,9 +276,14 @@ def generate_function_table():
 class Train:
     def __init__(self, address):
         self.address = address
-        self.group = [0, 0, 0, 0, 0]  # Initialize the state of function groups
+        self.group = [0, 0, 0, 0, 0]  # Initialize the state of function groups (F0-F28)
+        self.speed = 0
+        self.direction = FORWARD
 
     def throttle(self, speed, direction):
+        self.speed = speed
+        self.direction = direction
+
         message = bytearray(b'\xE4\x00\x00\x00\x00')
         message[1] = 0x13
         struct.pack_into(">H", message, 2, self.address)
@@ -280,6 +300,7 @@ class Train:
         send(message)
 
     def stop(self):
+        self.speed = 0
         message = bytearray(b'\x92\x00\x00')
         struct.pack_into(">H", message, 1, self.address)
 
@@ -312,6 +333,41 @@ class Train:
         message.append(xor_byte)
 
         send(message)
+
+    def update_throttle(self, speed, direction):
+        self.speed = speed
+        self.direction = direction
+
+    def update_functions(self, functions):
+        # Update each function's state based on the received data
+        for i, state in enumerate(functions.values()):
+            if i < len(self.group):
+                if state:
+                    self.group[i] |= 1 << i
+                else:
+                    self.group[i] &= ~(1 << i)
+
+    def getState(self):
+        # Construct the function states
+        functions = {}
+        for i in range(29):  # F0 to F28
+            group_index = i // 8
+            bitmask = 1 << (i % 8)
+            functions[f"{i}"] = bool(self.group[group_index] & bitmask)
+
+        # Construct the state message
+        response = {
+            "status_code": 200,
+            "message": "Train State Retrieved Successfully",
+            "data": {
+                "train_number": self.address,
+                "speed": self.speed,
+                "direction": "Forward" if self.direction == FORWARD else "Reverse",
+                "functions": functions
+            }
+        }
+
+        return response
 
 class Accessory:
     def __init__(self, address):

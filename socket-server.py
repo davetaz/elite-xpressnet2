@@ -8,6 +8,7 @@ import os
 import requests
 import netifaces as ni
 import xpressNet
+from mockController import MockHornbyController  # Import the MockHornbyController
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,8 +16,6 @@ load_dotenv()
 CONTROL_KEY = os.getenv('CONTROL_KEY')
 NODE_SERVER_URL = os.getenv('NODE_SERVER_URL')
 
-# Dictionary to store the state of trains
-train_state = {}
 connected_clients = set()
 
 class RealHornbyController:
@@ -39,70 +38,36 @@ class RealHornbyController:
         return self.accessories[accessory_number]
 
     def throttle(self, train_number, speed, direction):
-        # Control the train throttle
         train = self.get_train(train_number)
         train.throttle(speed, direction)
+        return train.getState()
 
     def stop(self, train_number):
-        # Control the train throttle
         train = self.get_train(train_number)
         train.stop()
+        return train.getState()
 
     def function(self, train_number, function_id, switch):
-        # Control the train function
         train = self.get_train(train_number)
         train.function(function_id, switch)
+        return train.getState()
 
     def accessory(self, accessory_number, direction):
-        # Control the accessory based on the state parameter
-        accessory = self.get_accessory(accessory_number)
-        if direction == "FORWARD":
-            accessory.activateOutput2()
-        elif direction == "REVERSE":
-            accessory.activateOutput1()
-        else:
-            print("Invalid state specified.")
+        try:
+            accessory = self.get_accessory(accessory_number)
+            if direction == "FORWARD":
+                accessory.activateOutput2()
+            elif direction == "REVERSE":
+                accessory.activateOutput1()
+            else:
+                return {"status_code": 400, "message": "Invalid accessory direction"}
+            return {"status_code": 200, "message": "Accessory command sent successfully"}
+        except Exception as e:
+            return {"status_code": 500, "message": f"Error sending accessory command: {str(e)}"}
 
-class MockHornbyController:
-    def __init__(self):
-        self.trains = {}
-        self.accessories = {}
-
-    def get_train(self, train_number):
-        if train_number not in self.trains:
-            self.trains[train_number] = {'speed': 0, 'direction': xpressNet.FORWARD}
-        return self.trains[train_number]
-
-    def throttle(self, train_number, speed, direction):
-        # Simulate throttle control (update mock state)
-        print(f"Mock Throttle: Train {train_number}, Speed {speed}, Direction {direction}")
-        self.trains[train_number] = {'speed': speed, 'direction': direction}
-
-    def stop(self, train_number):
-        # Simulate stop (update mock state)
-        print(f"Mock Stop: Train {train_number}")
-        if train_number in self.trains:
-            # Keep the direction the same but set the speed to 0
-            self.trains[train_number]['speed'] = 0
-        else:
-            # If the train is not in the state, assume default direction and stop
-            self.trains[train_number] = {'speed': 0, 'direction': xpressNet.FORWARD}
-
-    def function(self, train_number, function_id, switch):
-        # Simulate function control (update mock state)
-        print(f"Mock Function: Train {train_number}, Function {function_id}, Switch {switch}")
-        if train_number not in self.trains:
-            self.trains[train_number] = {}
-        self.trains[train_number][f'function_{function_id}'] = switch
-
-    def accessory(self, accessory_number, direction):
-        # Simulate accessory control (update mock state)
-        print(f"Mock Accessory: Accessory {accessory_number}, Direction {direction}")
-        self.accessories[accessory_number] = direction
-
-# Define a callback function to handle messages
+# Define a callback function to handle messages and forward them to all clients
 def response_handler(message):
-    print(f"{message}")
+    asyncio.run(broadcast_message(json.loads(message)))
 
 # Check if the real controller is available
 def is_real_controller_available():
@@ -173,43 +138,29 @@ async def websocket_handler(websocket, path):
                 direction = data['direction']
                 print(f'Throttle: Train: {train_number} | Speed: {speed} | Direction: {direction}')
 
-                # Send throttle command to the controller
-                controller.throttle(train_number, speed, direction)
+                # Send throttle command to the controller and get the response
+                response = controller.throttle(train_number, speed, direction)
 
-                # Update the train state
-                train_state[train_number] = {'speed': speed, 'direction': direction}
+                # Send the response only to the client who made the request
+                await websocket.send(json.dumps(response))
 
-                # Broadcast the throttle update to all connected clients
-                await broadcast_message({
-                    'action': 'throttle',
-                    'train_number': train_number,
-                    'speed': speed,
-                    'direction': direction
-                })
+                # If the response was successful, broadcast the updated state to all clients
+                if response['status_code'] == 200:
+                    await broadcast_message(response)
 
             elif action == 'stop':
                 train_number = data['train_number']
                 print(f'Stop: Train: {train_number}')
 
-                # Retrieve the current direction from train_state or default to FORWARD if not present
-                if train_number in train_state:
-                    direction = train_state[train_number]['direction']
-                else:
-                    direction = xpressNet.FORWARD  # Default direction
+                # Send stop command to the controller and get the response
+                response = controller.stop(train_number)
 
-                # Send stop command to the controller
-                controller.stop(train_number)
+                # Send the response only to the client who made the request
+                await websocket.send(json.dumps(response))
 
-                # Update the train state with speed set to 0 but keep the direction
-                train_state[train_number] = {'speed': 0, 'direction': direction}
-
-                # Broadcast the throttle update to all connected clients with speed set to 0
-                await broadcast_message({
-                    'action': 'throttle',
-                    'train_number': train_number,
-                    'speed': 0,
-                    'direction': direction
-                })
+                # If the response was successful, broadcast the updated state to all clients
+                if response['status_code'] == 200:
+                    await broadcast_message(response)
 
             elif action == 'function':
                 train_number = data['train_number']
@@ -217,31 +168,26 @@ async def websocket_handler(websocket, path):
                 switch = data['switch']
                 print(f'Function: Train: {train_number} | Function ID: {function_id} | Switch: {switch}')
 
-                # Send function command to the controller
-                controller.function(train_number, function_id, switch)
+                # Send function command to the controller and get the response
+                response = controller.function(train_number, function_id, switch)
 
-                # Broadcast the function update to all connected clients
-                await broadcast_message({
-                    'action': 'function',
-                    'train_number': train_number,
-                    'function_id': function_id,
-                    'switch': switch
-                })
+                # Send the response only to the client who made the request
+                await websocket.send(json.dumps(response))
+
+                # If the response was successful, broadcast the updated state to all clients
+                if response['status_code'] == 200:
+                    await broadcast_message(response)
 
             elif action == 'accessory':
                 accessory_number = data['accessory_number']
                 direction = data['direction']
                 print(f'Accessory: Accessory: {accessory_number} | Direction: {direction}')
 
-                # Send accessory command to the controller
-                controller.accessory(accessory_number, direction)
+                # Send accessory command to the controller and get the response
+                response = controller.accessory(accessory_number, direction)
 
-                # Broadcast the accessory update to all connected clients
-                await broadcast_message({
-                    'action': 'accessory',
-                    'accessory_number': accessory_number,
-                    'direction': direction
-                })
+                # Send the response only to the client who made the request
+                await websocket.send(json.dumps(response))
 
             elif action == 'controller_status':
                 status = 'online' if is_real_controller_available() else 'offline'
