@@ -3,6 +3,7 @@ import serial
 import threading
 import struct
 from functools import reduce
+import json
 
 # Constants for direction
 FORWARD = 0
@@ -60,6 +61,15 @@ def receive():
                     logging.error(f"OSError during reception: {e}")
                     listening = False
 
+import json
+import struct
+
+def decode_loco_address(high_byte, low_byte):
+    if high_byte < 0xC0:  # Addresses less than 100
+        return low_byte
+    else:  # Addresses from 100 to 9999
+        return ((high_byte & 0x3F) << 8) | low_byte
+
 # Process received data
 def process_data():
     global buffer
@@ -69,52 +79,129 @@ def process_data():
 
         if len(buffer) >= chunk_size:  # Check if we have enough bytes in the buffer to process this chunk
             chunk = buffer[:chunk_size]
-            message = None
+            response = {
+                "status_code": 200,
+                "message": None,
+                "data": {},
+                "debug": f"{to_hex(chunk)}"
+            }
 
-            # Handle Command Station Status Response
-            if chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
+            # Handle Loco Status Message (Function and Speed/Direction)
+            if chunk[0] == 0xE5 and len(chunk) >= 7:
+                print()
+                identification_byte = chunk[1]
+
+                # Extract Loco Address
+                loco_address = decode_loco_address(chunk[2], chunk[3])
+
+                if identification_byte == 0xF9:
+                    # Function message
+                    response["message"] = "Loco Function Status"
+                    response["data"]["loco_address"] = loco_address
+
+                    # Decode Function Group 1 and Group 2 states
+                    function_group_1 = chunk[4]
+                    function_group_2 = chunk[5]
+
+                    # Decode Function Group 1 (F0-F4) and Function Group 2 (F5-F12)
+                    function_group_1 = chunk[4]
+                    function_group_2 = chunk[5]
+
+                    response["data"]["functions"] = {
+                        "F0": bool(function_group_1 & 0x10),
+                        "F1": bool(function_group_1 & 0x01),
+                        "F2": bool(function_group_1 & 0x02),
+                        "F3": bool(function_group_1 & 0x04),
+                        "F4": bool(function_group_1 & 0x08),
+                        "F5": bool(function_group_2 & 0x01),
+                        "F6": bool(function_group_2 & 0x02),
+                        "F7": bool(function_group_2 & 0x04),
+                        "F8": bool(function_group_2 & 0x08),
+                        "F9": bool(function_group_2 & 0x10),
+                        "F10": bool(function_group_2 & 0x20),
+                        "F11": bool(function_group_2 & 0x40),
+                        "F12": bool(function_group_2 & 0x80),
+                    }
+
+                elif identification_byte == 0xF8:
+                    # Speed and direction message
+                    response["message"] = "Loco Speed/Direction Status"
+                    response["data"]["loco_address"] = loco_address
+                    # Additional decoding for speed and direction can go here
+
+            # Handle Command Station Status Response (200 OK)
+            elif chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
                 status_byte = chunk[2]
-                if status_byte == 0x00:
-                    message = "Command Station Status: Ready"
+                response["data"] = {
+                    "Ready": status_byte == 0x00,
+                    "Emergency_Off": bool(status_byte & 0x01),
+                    "Emergency_Stop": bool(status_byte & 0x02),
+                    "Auto_Start": bool(status_byte & 0x04),
+                    "Service_Mode": bool(status_byte & 0x08),
+                    "Powering_Up": bool(status_byte & 0x40),
+                    "RAM_Check_Error": bool(status_byte & 0x80)
+                }
+
+                # Determine the status code and message based on the status byte
+                if response["data"]["Emergency_Off"] or response["data"]["Emergency_Stop"] or response["data"]["RAM_Check_Error"]:
+                    response["status_code"] = 500
+                    response["message"] = "Internal Server Error"
+                elif response["data"]["Service_Mode"] or response["data"]["Powering_Up"]:
+                    response["status_code"] = 503
+                    response["message"] = "Service Unavailable"
+                elif response["data"]["Ready"]:
+                    response["status_code"] = 200
+                    response["message"] = "Ready"
                 else:
-                    if status_byte & 0x01:
-                        message = "Command Station Status: Emergency Off"
-                    if status_byte & 0x02:
-                        message = "Command Station Status: Emergency Stop"
-                    if status_byte & 0x04:
-                        message = "Command Station Status: Auto Start"
-                    if status_byte & 0x08:
-                        message = "Command Station Status: Service Mode"
-                    if status_byte & 0x40:
-                        message = "Command Station Status: Powering Up"
-                    if status_byte & 0x80:
-                        message = "Command Station Status: RAM Check Error"
+                    response["status_code"] = 200
+                    response["message"] = "Command Station Status OK"
 
             # Handle known sequences
             elif chunk[0] == 0x63 and chunk[1] == 0x21 and len(chunk) >= 3:
                 version_byte = chunk[2]
                 version_number = version_byte / 100.0
-                message = f"Hornby Elite - Version {version_number:.2f}"
+                response["status_code"] = 200  # OK
+                response["message"] = "Hornby Elite - Version"
+                response["data"] = {"version": f"{version_number:.2f}"}
+
             elif chunk[:3] == b'\x61\x00\x61':
-                message = "Track power off"
-            elif chunk[:3] == b'\x61\x00\x60':
-                message = "Normal operations resumed"
+                response["status_code"] = 500  # Server Error
+                response["message"] = "Track power off"
+
+            elif chunk[:3] == b'\x61\x00\x61':
+                response["status_code"] = 100  # Continue
+                response["message"] = "Normal operations resumed"
+
             elif chunk[:3] == b'\x81\x00\x81':
-                message = "Emergency off"
+                response["status_code"] = 500  # Server Error
+                response["message"] = "Emergency off"
+
             elif chunk[:3] == b'\x61\x02\x63':
-                message = "In service mode"
+                response["status_code"] = 503  # Service Unavailable
+                response["message"] = "In service mode"
+
             elif chunk[:2] == b'\x61\x80':
-                message = "Transmission error"
+                response["status_code"] = 400  # Bad Request
+                response["message"] = "Transmission error"
+
             elif chunk[:2] == b'\x61\x81':
-                message = "Command station busy"
-            elif chunk[:2] == b'\x61\x81':
-                message = "Command not supported"
+                response["status_code"] = 503  # Service Unavailable
+                response["message"] = "Command station busy"
+
+            elif chunk[:2] == b'\x61\x82':
+                response["status_code"] = 400  # Bad Request
+                response["message"] = "Command not supported"
+
             else:
-                message = f"Unknown data: {to_hex(chunk)}"
+                response["status_code"] = 520  # Unknown Error
+                response["message"] = f"Unknown data: {to_hex(chunk)}"
+
+            # Convert the response to JSON
+            json_message = json.dumps(response)
 
             # Call the callback function if available
-            if callback and message:
-                callback(message)
+            if callback and response["message"]:
+                callback(json_message)
 
             buffer = buffer[chunk_size:]  # Remove the processed chunk from the buffer
         else:
