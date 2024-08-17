@@ -127,7 +127,12 @@ def process_data():
                     # Speed and direction message
                     response["message"] = "Loco Speed/Direction Status"
                     response["data"]["loco_address"] = loco_address
-                    # Additional decoding for speed and direction can go here
+                    speed_direction_byte = chunk[5]
+                    direction = "Forward" if speed_direction_byte < 0x80 else "Reverse"
+                    speed = speed_direction_byte & 0x7F  # Extract the lower 7 bits for speed (0-127)
+
+                    response["data"]["direction"] = direction
+                    response["data"]["speed"] = speed
 
             # Handle Command Station Status Response (200 OK)
             elif chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
