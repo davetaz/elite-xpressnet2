@@ -6,8 +6,8 @@ from functools import reduce
 import json
 
 # Constants for direction
-FORWARD = 0
-REVERSE = 1
+REVERSE = 0
+FORWARD = 1
 OFF = 0
 ON = 1
 
@@ -136,7 +136,7 @@ def process_data():
                     response["action"] = "throttle"
                     response["data"]["train_number"] = train_number
                     speed_direction_byte = chunk[5]
-                    direction = FORWARD if speed_direction_byte < 0x80 else REVERSE
+                    direction = REVERSE if speed_direction_byte < 0x80 else FORWARD
                     speed = speed_direction_byte & 0x7F  # Extract the lower 7 bits for speed (0-127)
 
                     response["data"]["direction"] = "Forward" if direction == FORWARD else "Reverse"
@@ -184,7 +184,7 @@ def process_data():
                 response["status_code"] = 500  # Server Error
                 response["message"] = "Track power off"
 
-            elif chunk[:3] == b'\x61\x00\x60':
+            elif chunk[:3] == b'\x61\x01\x60':
                 response["status_code"] = 100  # Continue
                 response["message"] = "Normal operations resumed"
 
@@ -304,9 +304,13 @@ class Train:
         message = bytearray(b'\x92\x00\x00')
         struct.pack_into(">H", message, 1, self.address)
 
+
         # Calculate the XOR byte (checksum) using the global function
+        # message = bytearray(b'\x80\x80')
         xor_byte = calculate_checksum(message)
         message.append(xor_byte)
+        print(f"{to_hex(message)}")
+
 
         send(message)
 
@@ -349,6 +353,12 @@ class Train:
 
     def getState(self):
         # Construct the function states
+        message = bytearray(b'\xE3\x00\x00\x00');
+        struct.pack_into(">H", message, 2, self.address)
+        xor_byte = calculate_checksum(message)
+        message.append(xor_byte)
+        send(message)
+
         functions = {}
         for i in range(29):  # F0 to F28
             group_index = i // 8

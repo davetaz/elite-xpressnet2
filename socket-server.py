@@ -52,6 +52,10 @@ class RealHornbyController:
         train.function(function_id, switch)
         return train.getState()
 
+    def getState(self, train_number):
+        train = self.get_train(train_number)
+        return train.getState()
+
     def accessory(self, accessory_number, direction):
         try:
             accessory = self.get_accessory(accessory_number)
@@ -154,6 +158,20 @@ async def websocket_handler(websocket, path):
 
                 # Send stop command to the controller and get the response
                 response = controller.stop(train_number)
+
+                # Send the response only to the client who made the request
+                await websocket.send(json.dumps(response))
+
+                # If the response was successful, broadcast the updated state to all clients
+                if response['status_code'] == 200:
+                    await broadcast_message(response)
+
+            elif action == 'getState':
+                train_number = data['train_number']
+                print(f'getState: Train: {train_number}')
+
+                # Send stop command to the controller and get the response
+                response = controller.getState(train_number)
 
                 # Send the response only to the client who made the request
                 await websocket.send(json.dumps(response))
