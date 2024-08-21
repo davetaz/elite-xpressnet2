@@ -143,42 +143,21 @@ async def websocket_handler(websocket, path):
                 print(f'Throttle: Train: {train_number} | Speed: {speed} | Direction: {direction}')
 
                 # Send throttle command to the controller and get the response
-                response = controller.throttle(train_number, speed, direction)
-
-                # Send the response only to the client who made the request
-                await websocket.send(json.dumps(response))
-
-                # If the response was successful, broadcast the updated state to all clients
-                if response['status_code'] == 200:
-                    await broadcast_message(response)
+                controller.throttle(train_number, speed, direction)
 
             elif action == 'stop':
                 train_number = data['train_number']
                 print(f'Stop: Train: {train_number}')
 
                 # Send stop command to the controller and get the response
-                response = controller.stop(train_number)
-
-                # Send the response only to the client who made the request
-                await websocket.send(json.dumps(response))
-
-                # If the response was successful, broadcast the updated state to all clients
-                if response['status_code'] == 200:
-                    await broadcast_message(response)
+                controller.stop(train_number)
 
             elif action == 'getState':
                 train_number = data['train_number']
                 print(f'getState: Train: {train_number}')
 
                 # Send stop command to the controller and get the response
-                response = controller.getState(train_number)
-
-                # Send the response only to the client who made the request
-                await websocket.send(json.dumps(response))
-
-                # If the response was successful, broadcast the updated state to all clients
-                if response['status_code'] == 200:
-                    await broadcast_message(response)
+                controller.getState(train_number)
 
             elif action == 'function':
                 train_number = data['train_number']
@@ -187,14 +166,7 @@ async def websocket_handler(websocket, path):
                 print(f'Function: Train: {train_number} | Function ID: {function_id} | Switch: {switch}')
 
                 # Send function command to the controller and get the response
-                response = controller.function(train_number, function_id, switch)
-
-                # Send the response only to the client who made the request
-                await websocket.send(json.dumps(response))
-
-                # If the response was successful, broadcast the updated state to all clients
-                if response['status_code'] == 200:
-                    await broadcast_message(response)
+                controller.function(train_number, function_id, switch)
 
             elif action == 'accessory':
                 accessory_number = data['accessory_number']
@@ -202,10 +174,7 @@ async def websocket_handler(websocket, path):
                 print(f'Accessory: Accessory: {accessory_number} | Direction: {direction}')
 
                 # Send accessory command to the controller and get the response
-                response = controller.accessory(accessory_number, direction)
-
-                # Send the response only to the client who made the request
-                await websocket.send(json.dumps(response))
+                controller.accessory(accessory_number, direction)
 
             elif action == 'controller_status':
                 status = 'online' if is_real_controller_available() else 'offline'

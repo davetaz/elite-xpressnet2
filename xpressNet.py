@@ -4,6 +4,7 @@ import threading
 import struct
 from functools import reduce
 import json
+import time
 
 # Constants for direction
 REVERSE = 0
@@ -25,6 +26,12 @@ function_table = []
 
 # Global dictionary to store active Train instances
 train_instances = {}
+
+# Global variable to store the last requested train state address
+last_requested_train_address = None
+
+# Global variable to track if the first response has been processed
+first_response_processed = False
 
 # Calculate checksum
 def calculate_checksum(data):
@@ -72,7 +79,7 @@ def decode_train_number(high_byte, low_byte):
 
 # Process received data
 def process_data():
-    global buffer, train_instances
+    global buffer, train_instances, first_response_processed
     while len(buffer) > 0:
         header_byte = buffer[0]
         chunk_size = (header_byte & 0x0F) + 2  # Calculate chunk size from the last nibble + 2 (header + data bytes)
@@ -86,7 +93,7 @@ def process_data():
                 "debug": f"{to_hex(chunk)}"
             }
 
-            # Handle Loco Status Message (Function and Speed/Direction)
+            # Handle Loco Status Message (Function and Speed/Direction) returned from Elite after request
             if chunk[0] == 0xE5 and len(chunk) >= 7:
                 identification_byte = chunk[1]
 
@@ -144,6 +151,111 @@ def process_data():
 
                     # Update train state
                     train.update_throttle(speed, direction)
+
+            # Handle loco state message (returned from Elite after getState request, e.g. E40095000071 - No address!)
+            elif chunk[0] == 0xE4 and len(chunk) >= 6:
+                identification_byte = chunk[1]
+                if last_requested_train_address is not None:
+                    response["message"] = "Loco State"
+                    response["action"] = "getState"
+                    # Handle the response using the last requested address
+                    train_number = last_requested_train_address
+                    response["data"]["train_number"] = train_number
+
+                    # Ensure the train instance exists
+                    if train_number not in train_instances:
+                        train_instances[train_number] = Train(train_number)
+
+                    train = train_instances[train_number]
+
+                    speed_direction_byte = chunk[2]
+                    direction = REVERSE if speed_direction_byte < 0x80 else FORWARD
+                    speed = speed_direction_byte & 0x7F  # Extract the lower 7 bits for speed (0-127)
+
+                    response["data"]["direction"] = "Forward" if direction == FORWARD else "Reverse"
+                    response["data"]["speed"] = speed
+
+                    # Decode Function Group 1 (F0-F4) and Function Group 2 (F5-F12)
+                    function_group_1 = chunk[3]
+                    function_group_2 = chunk[4]
+
+                    functions = {
+                        "0": bool(function_group_1 & 0x10),
+                        "1": bool(function_group_1 & 0x01),
+                        "2": bool(function_group_1 & 0x02),
+                        "3": bool(function_group_1 & 0x04),
+                        "4": bool(function_group_1 & 0x08),
+                        "5": bool(function_group_2 & 0x01),
+                        "6": bool(function_group_2 & 0x02),
+                        "7": bool(function_group_2 & 0x04),
+                        "8": bool(function_group_2 & 0x08),
+                        "9": bool(function_group_2 & 0x10),
+                        "10": bool(function_group_2 & 0x20),
+                        "11": bool(function_group_2 & 0x40),
+                        "12": bool(function_group_2 & 0x80),
+                    }
+
+                    # Update train state
+                    train.update_throttle(speed, direction)
+                    train.update_functions(functions)
+
+                    # Add functions 13-28 from the train's cached state
+                    for i in range(13, 29):
+                        group_index, _, bitmask = function_table[i]
+                        functions[str(i)] = bool(train.group[group_index] & bitmask)
+
+                    response["data"]["functions"] = functions
+
+                    # Mark the first response as processed
+                    first_response_processed = True
+
+            # Handle loco state message for functions F13-F28
+            elif chunk[0] == 0xE3 and len(chunk) >= 5:
+                identification_byte = chunk[1]
+                if last_requested_train_address is not None:
+                    response["message"] = "Loco State"
+                    response["action"] = "getState"
+                    # Handle the response using the last requested address
+                    train_number = last_requested_train_address
+                    response["data"]["train_number"] = train_number
+
+                    # Ensure the train instance exists
+                    if train_number not in train_instances:
+                        train_instances[train_number] = Train(train_number)
+
+                    train = train_instances[train_number]
+
+                    # Decode Function Group 3 (F13-F20) and Function Group 4 (F21-F28)
+                    function_group_3 = chunk[2]
+                    function_group_4 = chunk[3]
+
+                    functions = {
+                        "13": bool(function_group_3 & 0x01),
+                        "14": bool(function_group_3 & 0x02),
+                        "15": bool(function_group_3 & 0x04),
+                        "16": bool(function_group_3 & 0x08),
+                        "17": bool(function_group_3 & 0x10),
+                        "18": bool(function_group_3 & 0x20),
+                        "19": bool(function_group_3 & 0x40),
+                        "20": bool(function_group_3 & 0x80),
+                        "21": bool(function_group_4 & 0x01),
+                        "22": bool(function_group_4 & 0x02),
+                        "23": bool(function_group_4 & 0x04),
+                        "24": bool(function_group_4 & 0x08),
+                        "25": bool(function_group_4 & 0x10),
+                        "26": bool(function_group_4 & 0x20),
+                        "27": bool(function_group_4 & 0x40),
+                        "28": bool(function_group_4 & 0x80),
+                    }
+
+                    # Update train state
+                    train.update_functions(functions)
+
+                    for i in range(0, 13):
+                        group_index, _, bitmask = function_table[i]
+                        functions[str(i)] = bool(train.group[group_index] & bitmask)
+
+                    response["data"]["functions"] = functions
 
             # Handle Command Station Status Response (200 OK)
             elif chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
@@ -280,6 +392,36 @@ class Train:
         self.speed = 0
         self.direction = FORWARD
 
+    def getState(self):
+        global last_requested_train_address, first_response_processed
+        # Set the global variable to the current train address
+        last_requested_train_address = self.address
+        first_response_processed = False  # Reset the flag
+
+        # Construct the function states
+        message = bytearray(b'\xE3\x00\x00\x00')
+        struct.pack_into(">H", message, 2, self.address)
+        xor_byte = calculate_checksum(message)
+        message.append(xor_byte)
+        send(message)
+
+         # Start a timer to enforce a timeout
+        start_time = time.time()
+        timeout = 5  # seconds
+
+        # Wait for the first response to be processed or timeout
+        while not first_response_processed:
+            if time.time() - start_time > timeout:
+                logging.warning(f"Timeout waiting for first response for train {self.address}. Continuing anyway.")
+                break
+            time.sleep(0.01)  # Polling with a short delay
+
+        message = bytearray(b'\xE3\x08\x00\x00')
+        struct.pack_into(">H", message, 2, self.address)
+        xor_byte = calculate_checksum(message)
+        message.append(xor_byte)
+        send(message)
+
     def throttle(self, speed, direction):
         self.speed = speed
         self.direction = direction
@@ -299,20 +441,14 @@ class Train:
 
         send(message)
 
+    # The Hornby ELITE does not support emergency stop of a locomotive, so do not set a deceleration rate in the decoder
     def stop(self):
-        self.speed = 0
-        message = bytearray(b'\x92\x00\x00')
-        struct.pack_into(">H", message, 1, self.address)
-
-
-        # Calculate the XOR byte (checksum) using the global function
-        # message = bytearray(b'\x80\x80')
-        xor_byte = calculate_checksum(message)
-        message.append(xor_byte)
-        print(f"{to_hex(message)}")
-
-
-        send(message)
+        self.throttle(0,self.direction)
+        #message = bytearray(b'\x92\x00\x00')
+        #struct.pack_into(">H", message, 1, self.address)
+        #xor_byte = calculate_checksum(message)
+        #message.append(xor_byte)
+        #send(message)
 
     def function(self, num, switch):
         if num >= len(function_table):
@@ -343,41 +479,16 @@ class Train:
         self.direction = direction
 
     def update_functions(self, functions):
-        # Update each function's state based on the received data
-        for i, state in enumerate(functions.values()):
-            if i < len(self.group):
+    # Update each function's state based on the received data
+        for i in range(29):  # Loop through all functions F0-F28
+            if str(i) in functions:
+                state = functions[str(i)]
+                group_index, _, bitmask = function_table[i]  # Retrieve correct group index and bitmask
+
                 if state:
-                    self.group[i] |= 1 << i
+                    self.group[group_index] |= bitmask  # Turn on the function
                 else:
-                    self.group[i] &= ~(1 << i)
-
-    def getState(self):
-        # Construct the function states
-        message = bytearray(b'\xE3\x00\x00\x00');
-        struct.pack_into(">H", message, 2, self.address)
-        xor_byte = calculate_checksum(message)
-        message.append(xor_byte)
-        send(message)
-
-        functions = {}
-        for i in range(29):  # F0 to F28
-            group_index = i // 8
-            bitmask = 1 << (i % 8)
-            functions[f"{i}"] = bool(self.group[group_index] & bitmask)
-
-        # Construct the state message
-        response = {
-            "status_code": 200,
-            "message": "Train State Retrieved Successfully",
-            "data": {
-                "train_number": self.address,
-                "speed": self.speed,
-                "direction": "Forward" if self.direction == FORWARD else "Reverse",
-                "functions": functions
-            }
-        }
-
-        return response
+                    self.group[group_index] &= ~bitmask  # Turn off the function
 
 class Accessory:
     def __init__(self, address):
