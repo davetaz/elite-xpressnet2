@@ -113,23 +113,23 @@ def process_data():
                     response["data"]["train_number"] = train_number
 
                     # Decode Function Group 1 (F0-F4) and Function Group 2 (F5-F12)
-                    function_group_1 = chunk[4]
-                    function_group_2 = chunk[5]
+                    function_group_0 = chunk[4]
+                    function_group_1 = chunk[5]
 
                     functions = {
-                        "0": bool(function_group_1 & 0x10),
-                        "1": bool(function_group_1 & 0x01),
-                        "2": bool(function_group_1 & 0x02),
-                        "3": bool(function_group_1 & 0x04),
-                        "4": bool(function_group_1 & 0x08),
-                        "5": bool(function_group_2 & 0x01),
-                        "6": bool(function_group_2 & 0x02),
-                        "7": bool(function_group_2 & 0x04),
-                        "8": bool(function_group_2 & 0x08),
-                        "9": bool(function_group_2 & 0x10),
-                        "10": bool(function_group_2 & 0x20),
-                        "11": bool(function_group_2 & 0x40),
-                        "12": bool(function_group_2 & 0x80),
+                        "0": bool(function_group_0 & 0x10),
+                        "1": bool(function_group_0 & 0x01),
+                        "2": bool(function_group_0 & 0x02),
+                        "3": bool(function_group_0 & 0x04),
+                        "4": bool(function_group_0 & 0x08),
+                        "5": bool(function_group_1 & 0x01),
+                        "6": bool(function_group_1 & 0x02),
+                        "7": bool(function_group_1 & 0x04),
+                        "8": bool(function_group_1 & 0x08),
+                        "9": bool(function_group_1 & 0x10),
+                        "10": bool(function_group_1 & 0x20),
+                        "11": bool(function_group_1 & 0x40),
+                        "12": bool(function_group_1 & 0x80),
                     }
 
                     response["data"]["functions"] = functions
@@ -176,23 +176,23 @@ def process_data():
                     response["data"]["speed"] = speed
 
                     # Decode Function Group 1 (F0-F4) and Function Group 2 (F5-F12)
-                    function_group_1 = chunk[3]
-                    function_group_2 = chunk[4]
+                    function_group_0 = chunk[3]
+                    function_group_1 = chunk[4]
 
                     functions = {
-                        "0": bool(function_group_1 & 0x10),
-                        "1": bool(function_group_1 & 0x01),
-                        "2": bool(function_group_1 & 0x02),
-                        "3": bool(function_group_1 & 0x04),
-                        "4": bool(function_group_1 & 0x08),
-                        "5": bool(function_group_2 & 0x01),
-                        "6": bool(function_group_2 & 0x02),
-                        "7": bool(function_group_2 & 0x04),
-                        "8": bool(function_group_2 & 0x08),
-                        "9": bool(function_group_2 & 0x10),
-                        "10": bool(function_group_2 & 0x20),
-                        "11": bool(function_group_2 & 0x40),
-                        "12": bool(function_group_2 & 0x80),
+                        "0": bool(function_group_0 & 0x10),
+                        "1": bool(function_group_0 & 0x01),
+                        "2": bool(function_group_0 & 0x02),
+                        "3": bool(function_group_0 & 0x04),
+                        "4": bool(function_group_0 & 0x08),
+                        "5": bool(function_group_1 & 0x01),
+                        "6": bool(function_group_1 & 0x02),
+                        "7": bool(function_group_1 & 0x04),
+                        "8": bool(function_group_1 & 0x08),
+                        "9": bool(function_group_1 & 0x10),
+                        "10": bool(function_group_1 & 0x20),
+                        "11": bool(function_group_1 & 0x40),
+                        "12": bool(function_group_1 & 0x80),
                     }
 
                     # Update train state
@@ -226,26 +226,26 @@ def process_data():
                     train = train_instances[train_number]
 
                     # Decode Function Group 3 (F13-F20) and Function Group 4 (F21-F28)
-                    function_group_3 = chunk[2]
-                    function_group_4 = chunk[3]
+                    function_group_2 = chunk[2]
+                    function_group_3 = chunk[3]
 
                     functions = {
-                        "13": bool(function_group_3 & 0x01),
-                        "14": bool(function_group_3 & 0x02),
-                        "15": bool(function_group_3 & 0x04),
-                        "16": bool(function_group_3 & 0x08),
-                        "17": bool(function_group_3 & 0x10),
-                        "18": bool(function_group_3 & 0x20),
-                        "19": bool(function_group_3 & 0x40),
-                        "20": bool(function_group_3 & 0x80),
-                        "21": bool(function_group_4 & 0x01),
-                        "22": bool(function_group_4 & 0x02),
-                        "23": bool(function_group_4 & 0x04),
-                        "24": bool(function_group_4 & 0x08),
-                        "25": bool(function_group_4 & 0x10),
-                        "26": bool(function_group_4 & 0x20),
-                        "27": bool(function_group_4 & 0x40),
-                        "28": bool(function_group_4 & 0x80),
+                        "13": bool(function_group_2 & 0x01),
+                        "14": bool(function_group_2 & 0x02),
+                        "15": bool(function_group_2 & 0x04),
+                        "16": bool(function_group_2 & 0x08),
+                        "17": bool(function_group_2 & 0x10),
+                        "18": bool(function_group_2 & 0x20),
+                        "19": bool(function_group_2 & 0x40),
+                        "20": bool(function_group_2 & 0x80),
+                        "21": bool(function_group_3 & 0x01),
+                        "22": bool(function_group_3 & 0x02),
+                        "23": bool(function_group_3 & 0x04),
+                        "24": bool(function_group_3 & 0x08),
+                        "25": bool(function_group_3 & 0x10),
+                        "26": bool(function_group_3 & 0x20),
+                        "27": bool(function_group_3 & 0x40),
+                        "28": bool(function_group_3 & 0x80),
                     }
 
                     # Update train state
@@ -375,7 +375,7 @@ def generate_function_table():
     function_table.append([0, 0x20, 0x10])
     # Group 0 (F0-F4)
     function_table.extend([[0, 0x20, 1 << i] for i in range(4)])
-    # Group 1 (F5-F8)
+    # Group 1 (F5-F12)
     function_table.extend([[1, 0x21, 1 << i] for i in range(4)])
     # Group 2 (F9-F12)
     function_table.extend([[2, 0x22, 1 << i] for i in range(4)])
