@@ -260,6 +260,7 @@ def process_data():
             # Handle Command Station Status Response (200 OK)
             elif chunk[0] == 0x62 and chunk[1] == 0x22 and len(chunk) >= 3:
                 status_byte = chunk[2]
+                response["message"] = "Status"
                 response["data"] = {
                     "Ready": status_byte == 0x00,
                     "Emergency_Off": bool(status_byte & 0x01),
@@ -273,24 +274,28 @@ def process_data():
                 # Determine the status code and message based on the status byte
                 if response["data"]["Emergency_Off"] or response["data"]["Emergency_Stop"] or response["data"]["RAM_Check_Error"]:
                     response["status_code"] = 500
-                    response["message"] = "Internal Server Error"
+#                    response["message"] = "Internal Server Error"
                 elif response["data"]["Service_Mode"] or response["data"]["Powering_Up"]:
                     response["status_code"] = 503
-                    response["message"] = "Service Unavailable"
+#                    response["message"] = "Service Unavailable"
                 elif response["data"]["Ready"]:
                     response["status_code"] = 200
-                    response["message"] = "Ready"
+#                    response["message"] = "Ready"
                 else:
                     response["status_code"] = 200
-                    response["message"] = "Command Station Status OK"
+#                    response["message"] = "Command Station Status OK"
 
             # Handle known sequences
             elif chunk[0] == 0x63 and chunk[1] == 0x21 and len(chunk) >= 3:
                 version_byte = chunk[2]
                 version_number = version_byte / 100.0
                 response["status_code"] = 200  # OK
-                response["message"] = "Hornby Elite - Version"
-                response["data"] = {"version": f"{version_number:.2f}"}
+                response["message"] = "controller"
+                response["data"] = {
+                    "Make": "Hornby",
+                    "Model": "Elite",
+                    "Version": f"{version_number:.2f}"
+                }
 
             elif chunk[:3] == b'\x61\x00\x61':
                 response["status_code"] = 500  # Server Error
@@ -367,6 +372,26 @@ def connection_close():
     if ser and ser.is_open:
         ser.close()
         ser = None
+
+# Get version command
+def getVersion():
+    get_version = [0x21, 0x21]
+    send(get_version)
+
+# Get status command
+def getStatus():
+    get_status = [0x21, 0x24]
+    send(get_status)
+
+# Emergency Off Request
+def emergencyOff():
+    emergency_off = [0x21, 0x80]
+    send(emergency_off)
+
+# Emergency Off Request
+def resumeNormalOperations():
+    resume_normal_operations = [0x21, 0x81]
+    send(resume_normal_operations)
 
 def generate_function_table():
     global function_table
@@ -523,16 +548,6 @@ class Accessory:
         message.append(xor_byte)
 
         send(message)
-
-# Get version command
-def getVersion():
-    get_version = [0x21, 0x21]
-    send(get_version)
-
-# Get status command
-def getStatus():
-    get_status = [0x21, 0x24]
-    send(get_status)
 
 class XpressNetException(Exception):
     pass

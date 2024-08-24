@@ -27,15 +27,22 @@ class RealHornbyController:
         except ImportError:
             raise ImportError("xpressNet library not installed. Please install it to use the real controller.")
 
+    def getStatus(self):
+        xpressNet.getStatus()
+
+    def getVersion(self):
+        xpressNet.getVersion()
+
+    def emergencyOff(self):
+        xpressNet.emergencyOff()
+
+    def resumeNormalOperations(self):
+        xpressNet.resumeNormalOperations()
+
     def get_train(self, train_number):
         if train_number not in self.trains:
             self.trains[train_number] = xpressNet.Train(train_number)
         return self.trains[train_number]
-
-    def get_accessory(self, accessory_number):
-        if accessory_number not in self.accessories:
-            self.accessories[accessory_number] = xpressNet.Accessory(accessory_number)
-        return self.accessories[accessory_number]
 
     def throttle(self, train_number, speed, direction):
         train = self.get_train(train_number)
@@ -68,6 +75,11 @@ class RealHornbyController:
             return {"status_code": 200, "message": "Accessory command sent successfully"}
         except Exception as e:
             return {"status_code": 500, "message": f"Error sending accessory command: {str(e)}"}
+
+    def get_accessory(self, accessory_number):
+        if accessory_number not in self.accessories:
+            self.accessories[accessory_number] = xpressNet.Accessory(accessory_number)
+        return self.accessories[accessory_number]
 
 # Define a callback function to handle messages and forward them to all clients
 def response_handler(message):
@@ -135,6 +147,18 @@ async def websocket_handler(websocket, path):
         async for message in websocket:
             data = json.loads(message)
             action = data.get('action')
+
+            if action == 'getControllerStatus':
+                controller.getStatus()
+
+            if action == 'getControllerVersion':
+                controller.getVersion()
+
+            if action == 'emergencyOff':
+                controller.emergencyOff()
+
+            if action == 'resumeNormalOperations':
+                controller.resumeNormalOperations()
 
             if action == 'throttle':
                 train_number = data['train_number']
