@@ -3,22 +3,17 @@ import websockets
 import json
 import threading
 import time
+import socket
 from dotenv import load_dotenv
-import os
-import requests
-import netifaces as ni
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from zeroconf import ServiceInfo, Zeroconf
+
 import xpressNet
-from mockController import MockHornbyController  # Import the MockHornbyController
 
-# Load environment variables from .env file
-load_dotenv()
-
-CONTROL_KEY = os.getenv('CONTROL_KEY')
-NODE_SERVER_URL = os.getenv('NODE_SERVER_URL')
-
+controller = None
 connected_clients = set()
 
-class RealHornbyController:
+class XpressNetController:
     def __init__(self, device_path, baud_rate, message_delay, response_handler):
         try:
             xpressNet.connection_open(device_path, baud_rate, message_delay, response_handler)
@@ -86,7 +81,7 @@ def response_handler(message):
     asyncio.run(broadcast_message(json.loads(message)))
 
 # Check if the real controller is available
-def is_real_controller_available():
+def is_controller_available():
     try:
         xpressNet.connection_open('/dev/ttyACM0', 19200, 0.25, response_handler)
         return True
@@ -95,58 +90,86 @@ def is_real_controller_available():
     except Exception as e:
         return False
 
-# Create the appropriate controller based on availability
-if is_real_controller_available():
-    print(" * Connected to xPressNet controller")
-    controller = RealHornbyController('/dev/ttyACM0', 19200, 0.25, response_handler)
-else:
-    print(" * Using mock controller")
-    controller = MockHornbyController()
-
+# Function to get local IP address
 def get_local_ip():
-    gateways = ni.gateways()
-    default_gateway = gateways['default'][ni.AF_INET][1]
-    return ni.ifaddresses(default_gateway)[ni.AF_INET][0]['addr']
-
-def get_global_ips():
+    """Get the local IP address of the machine."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        global_ipv4 = requests.get('https://api.ipify.org').text
-        global_ipv6 = requests.get('https://api64.ipify.org').text
-        return global_ipv4, global_ipv6
-    except Exception as e:
-        print(f'Error getting global IPs: {e}')
-        return None, None
+        # Connect to an external server, does not need to be reachable
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
 
-def send_server_status():
-    local_ip = get_local_ip()
-    global_ipv4, global_ipv6 = get_global_ips()
-    last_reported = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+# Simple HTTP server to show information
+class RequestHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Prepare the response data
+        hostname = socket.gethostname()
+        local_ip = get_local_ip()
+        websocket_port = 8080
+        controller_status = "Connected" if controller is not None else "Not Connected"
 
-    headers = {'Authorization': f'Bearer {CONTROL_KEY}'}
-    data = {
-        'localIP': local_ip,
-        'globalIPv4': global_ipv4,
-        'globalIPv6': global_ipv6,
-        'lastReported': last_reported
+        response = f"""
+        <html>
+            <head><title>xpressNet Control</title></head>
+            <body>
+                <h1>xpressNet Control Status</h1>
+                <p><strong>Hostname:</strong> {hostname}</p>
+                <p><strong>Local IP:</strong> {local_ip}</p>
+                <p><strong>WebSocket Port:</strong> {websocket_port}</p>
+                <p><strong>Controller Status:</strong> {controller_status}</p>
+            </body>
+        </html>
+        """
+
+        # Send response
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(response.encode('utf-8'))
+
+# Function to start HTTP server
+def start_http_server():
+    http_port = 80
+    server = HTTPServer(('0.0.0.0', http_port), RequestHandler)
+    print(f"HTTP server started on port {http_port}")
+    server.serve_forever()
+
+# Function to send status updates to all connected clients
+async def send_status_update():
+    response = {
+        "status_code": 200,
+        "message": "SocketStatus",
+        "data": {
+            "Ready": True,
+            "Clients": len(connected_clients),
+            "Controller_Connected": controller is not None
+        }
     }
-    try:
-        response = requests.post(NODE_SERVER_URL, json=data, headers=headers)
-        if response.status_code == 200:
-            print('Server status updated successfully.')
-        else:
-            print(f'Failed to update server status: {response.status_code}')
-    except requests.exceptions.RequestException as e:
-        print(f'Error updating server status: {e}')
+    await broadcast_message(response)
 
 async def websocket_handler(websocket, path):
     print("Client connected")
-    # Add the new connection to the set of connected clients
     connected_clients.add(websocket)
+
+    # Send status update when a new client connects
+    await send_status_update()
 
     try:
         async for message in websocket:
             data = json.loads(message)
             action = data.get('action')
+
+            if controller is None:
+                await websocket.send(json.dumps({
+                    'type': 'error',
+                    'message': 'Controller not detected'
+                }))
+                continue
 
             if action == 'getControllerStatus':
                 controller.getStatus()
@@ -166,21 +189,18 @@ async def websocket_handler(websocket, path):
                 direction = data['direction']
                 print(f'Throttle: Train: {train_number} | Speed: {speed} | Direction: {direction}')
 
-                # Send throttle command to the controller and get the response
                 controller.throttle(train_number, speed, direction)
 
             elif action == 'stop':
                 train_number = data['train_number']
                 print(f'Stop: Train: {train_number}')
 
-                # Send stop command to the controller and get the response
                 controller.stop(train_number)
 
             elif action == 'getState':
                 train_number = data['train_number']
                 print(f'getState: Train: {train_number}')
 
-                # Send stop command to the controller and get the response
                 controller.getState(train_number)
 
             elif action == 'function':
@@ -189,7 +209,6 @@ async def websocket_handler(websocket, path):
                 switch = data['switch']
                 print(f'Function: Train: {train_number} | Function ID: {function_id} | Switch: {switch}')
 
-                # Send function command to the controller and get the response
                 controller.function(train_number, function_id, switch)
 
             elif action == 'accessory':
@@ -197,11 +216,10 @@ async def websocket_handler(websocket, path):
                 direction = data['direction']
                 print(f'Accessory: Accessory: {accessory_number} | Direction: {direction}')
 
-                # Send accessory command to the controller and get the response
                 controller.accessory(accessory_number, direction)
 
             elif action == 'controller_status':
-                status = 'online' if is_real_controller_available() else 'offline'
+                status = 'online' if is_controller_available() else 'offline'
                 await websocket.send(json.dumps({
                     'type': 'controller_status',
                     'status': status
@@ -210,16 +228,16 @@ async def websocket_handler(websocket, path):
     except websockets.ConnectionClosed:
         print("Client disconnected")
     finally:
-        # Remove the client from the connected clients set when they disconnect
         connected_clients.remove(websocket)
+        # Send status update when a client disconnects
+        await send_status_update()
 
 # Utility function to broadcast messages to all connected clients
 async def broadcast_message(message):
-    if connected_clients:  # Only try to broadcast if there are connected clients
+    if connected_clients:
         message_json = json.dumps(message)
-        # Create a list of tasks, ensuring each send call is turned into a Task
         tasks = [asyncio.create_task(client.send(message_json)) for client in connected_clients]
-        await asyncio.gather(*tasks)  # Wait for all tasks to complete
+        await asyncio.gather(*tasks)
 
 async def main():
     async with websockets.serve(websocket_handler, "0.0.0.0", 8080):
@@ -230,20 +248,47 @@ async def main():
 def controller_availability_check():
     global controller
     while True:
-        if is_real_controller_available():
-            if not isinstance(controller, RealHornbyController):
-                print("Real controller detected. Switching to real controller.")
-                controller = RealHornbyController('/dev/ttyACM0', 19200, 0.25, response_handler)
-            status = 'online'
+        if is_controller_available():
+            if controller is None:
+                print("Controller detected. Connecting...")
+                controller = XpressNetController('/dev/ttyACM0', 19200, 0.25, response_handler)
         else:
-            if not isinstance(controller, MockHornbyController):
-                print("Real controller not available. Switching to mock controller.")
-                controller = MockHornbyController()
-            status = 'offline'
-        #send_server_status()
+            if controller is not None:
+                print("Controller not available. Controller not detected.")
+                controller = None
+        # Send status update when controller status changes
+        asyncio.run(send_status_update())
         time.sleep(60)  # Check every 60 seconds
 
+def start_mdns_advertising():
+    local_ip = get_local_ip()
+    hostname = socket.gethostname()
+
+    # Define the service information
+    desc = {'path': '/'}
+    info = ServiceInfo(
+        "_http._tcp.local.",
+        "xpressNetControl._http._tcp.local.",
+        addresses=[socket.inet_aton(local_ip)],
+        port=8080,
+        properties=desc,
+        server=f"{hostname}.local.",
+    )
+
+    # Start the zeroconf service
+    zeroconf = Zeroconf()
+    zeroconf.register_service(info)
+    print(f"mDNS service registered: xpressNetControl on {local_ip} ({hostname}.local)")
+
 if __name__ == '__main__':
+    # Start mDNS/Bonjour advertising
+    start_mdns_advertising()
+
+    # Start HTTP server in a separate thread
+    http_server_thread = threading.Thread(target=start_http_server)
+    http_server_thread.daemon = True
+    http_server_thread.start()
+
     availability_check_thread = threading.Thread(target=controller_availability_check)
     availability_check_thread.daemon = True
     availability_check_thread.start()
