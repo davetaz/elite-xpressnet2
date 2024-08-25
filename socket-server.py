@@ -4,7 +4,6 @@ import json
 import threading
 import time
 import socket
-from dotenv import load_dotenv
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from zeroconf import ServiceInfo, Zeroconf
 
@@ -122,6 +121,28 @@ class RequestHandler(BaseHTTPRequestHandler):
                 <p><strong>Local IP:</strong> {local_ip}</p>
                 <p><strong>WebSocket Port:</strong> {websocket_port}</p>
                 <p><strong>Controller Status:</strong> {controller_status}</p>
+                <form method="POST" action="/emergencyOff">
+                    <button type="submit">Emergency Off</button>
+                </form>
+                <form method="POST" action="/resumeNormalOperations">
+                    <button type="submit">Resume Normal Operations</button>
+                </form>
+                <h2>Train 3 Control Test</h2>
+                <form method="POST" action="/train3Forward">
+                    <button type="submit">Foward - Speed 40</button>
+                </form>
+                <form method="POST" action="/train3Reverse">
+                    <button type="submit">Reverse - Speed 40</button>
+                </form>
+                <form method="POST" action="/train3Stop">
+                    <button type="submit">Stop</button>
+                </form>
+                <form method="POST" action="/f0On">
+                    <button type="submit">f0 - On</button>
+                </form>
+                <form method="POST" action="/f0Off">
+                    <button type="submit">f0 - Off</button>
+                </form>
             </body>
         </html>
         """
@@ -131,6 +152,36 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
         self.wfile.write(response.encode('utf-8'))
+
+    def do_POST(self):
+        # Handle form submissions
+        if controller is not None:
+            if self.path == '/emergencyOff':
+                print("Emergency Off triggered via web interface.")
+                controller.emergencyOff()
+            elif self.path == '/resumeNormalOperations':
+                print("Resume Normal Operations triggered via web interface.")
+                controller.resumeNormalOperations()
+            elif self.path == '/train3Forward':
+                print(f"Train 3 Throttle forward: Speed 40")
+                controller.throttle(3, 40, 1)
+            elif self.path == '/train3Reverse':
+                print(f"Train 3 Throttle reverse: Speed 40")
+                controller.throttle(3, 40, 0)
+            elif self.path == '/train3Stop':
+                print(f"Train 3: Stop")
+                controller.stop(3)
+            elif self.path == '/f0On':
+                print("Train 3 f0 - On triggered via web interface.")
+                controller.function(3, 0, True)
+            elif self.path == '/f0Off':
+                print("Train 3 f0 - Off triggered via web interface.")
+                controller.function(3, 0, False)
+
+        # Redirect back to the main page
+        self.send_response(303)
+        self.send_header('Location', '/')
+        self.end_headers()
 
 # Function to start HTTP server
 def start_http_server():
