@@ -352,18 +352,21 @@ def listen_serial():
 # Connection management
 def connection_open(device, baud, delay, cb=None):
     global ser, delay_between_commands, callback, listening
-    ser = serial.Serial(device, baud)
-    ser.timeout = 1.0  # 1-second timeout for reads
-    delay_between_commands = delay
-    callback = cb  # Set the callback function
-    listening = True
-    generate_function_table()
+    try:
+        ser = serial.Serial(device, baud)
+        ser.timeout = 1.0  # 1-second timeout for reads
+        delay_between_commands = delay
+        callback = cb  # Set the callback function
+        listening = True
+        generate_function_table()
 
-    logging.debug("Serial connection opened")
+        logging.debug("Serial connection opened")
 
-    listen_thread = threading.Thread(target=listen_serial)
-    listen_thread.daemon = True
-    listen_thread.start()
+        listen_thread = threading.Thread(target=listen_serial)
+        listen_thread.daemon = True
+        listen_thread.start()
+    except Exception as e:
+        logging.error(f"Failed to open serial connection: {e}")
 
 def connection_close():
     global ser, listening
@@ -423,29 +426,20 @@ class Train:
         last_requested_train_address = self.address
         first_response_processed = False  # Reset the flag
 
-        # Construct the function states
+        # Construct the function states (first part)
         message = bytearray(b'\xE3\x00\x00\x00')
         struct.pack_into(">H", message, 2, self.address)
         xor_byte = calculate_checksum(message)
         message.append(xor_byte)
         send(message)
 
-         # Start a timer to enforce a timeout
-        start_time = time.time()
-        timeout = 5  # seconds
-
-        # Wait for the first response to be processed or timeout
-        while not first_response_processed:
-            if time.time() - start_time > timeout:
-                logging.warning(f"Timeout waiting for first response for train {self.address}. Continuing anyway.")
-                break
-            time.sleep(0.01)  # Polling with a short delay
-
+        # Construct the function states (second part)
         message = bytearray(b'\xE3\x08\x00\x00')
         struct.pack_into(">H", message, 2, self.address)
         xor_byte = calculate_checksum(message)
         message.append(xor_byte)
         send(message)
+
 
     def throttle(self, speed, direction):
         self.speed = speed

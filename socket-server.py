@@ -4,11 +4,17 @@ import json
 import threading
 import time
 import socket
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
 from zeroconf import ServiceInfo, Zeroconf
+from dotenv import load_dotenv
+from http_server import start_http_server  # Import the HTTP server module
 
 import xpressNet
 
+# Load environment variables from config.env
+load_dotenv("config.env")
+
+controller_lock = threading.Lock()
 controller = None
 connected_clients = set()
 
@@ -102,93 +108,6 @@ def get_local_ip():
     finally:
         s.close()
     return ip
-
-# Simple HTTP server to show information
-class RequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Prepare the response data
-        hostname = socket.gethostname()
-        local_ip = get_local_ip()
-        websocket_port = 8080
-        controller_status = "Connected" if controller is not None else "Not Connected"
-
-        response = f"""
-        <html>
-            <head><title>xpressNet Control</title></head>
-            <body>
-                <h1>xpressNet Control Status</h1>
-                <p><strong>Hostname:</strong> {hostname}</p>
-                <p><strong>Local IP:</strong> {local_ip}</p>
-                <p><strong>WebSocket Port:</strong> {websocket_port}</p>
-                <p><strong>Controller Status:</strong> {controller_status}</p>
-                <form method="POST" action="/emergencyOff">
-                    <button type="submit">Emergency Off</button>
-                </form>
-                <form method="POST" action="/resumeNormalOperations">
-                    <button type="submit">Resume Normal Operations</button>
-                </form>
-                <h2>Train 3 Control Test</h2>
-                <form method="POST" action="/train3Forward">
-                    <button type="submit">Foward - Speed 40</button>
-                </form>
-                <form method="POST" action="/train3Reverse">
-                    <button type="submit">Reverse - Speed 40</button>
-                </form>
-                <form method="POST" action="/train3Stop">
-                    <button type="submit">Stop</button>
-                </form>
-                <form method="POST" action="/f0On">
-                    <button type="submit">f0 - On</button>
-                </form>
-                <form method="POST" action="/f0Off">
-                    <button type="submit">f0 - Off</button>
-                </form>
-            </body>
-        </html>
-        """
-
-        # Send response
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(response.encode('utf-8'))
-
-    def do_POST(self):
-        # Handle form submissions
-        if controller is not None:
-            if self.path == '/emergencyOff':
-                print("Emergency Off triggered via web interface.")
-                controller.emergencyOff()
-            elif self.path == '/resumeNormalOperations':
-                print("Resume Normal Operations triggered via web interface.")
-                controller.resumeNormalOperations()
-            elif self.path == '/train3Forward':
-                print(f"Train 3 Throttle forward: Speed 40")
-                controller.throttle(3, 40, 1)
-            elif self.path == '/train3Reverse':
-                print(f"Train 3 Throttle reverse: Speed 40")
-                controller.throttle(3, 40, 0)
-            elif self.path == '/train3Stop':
-                print(f"Train 3: Stop")
-                controller.stop(3)
-            elif self.path == '/f0On':
-                print("Train 3 f0 - On triggered via web interface.")
-                controller.function(3, 0, True)
-            elif self.path == '/f0Off':
-                print("Train 3 f0 - Off triggered via web interface.")
-                controller.function(3, 0, False)
-
-        # Redirect back to the main page
-        self.send_response(303)
-        self.send_header('Location', '/')
-        self.end_headers()
-
-# Function to start HTTP server
-def start_http_server():
-    http_port = 80
-    server = HTTPServer(('0.0.0.0', http_port), RequestHandler)
-    print(f"HTTP server started on port {http_port}")
-    server.serve_forever()
 
 # Function to send status updates to all connected clients
 async def send_status_update():
@@ -295,21 +214,17 @@ async def main():
         print("WebSocket server started")
         await asyncio.Future()  # run forever
 
-# Periodically check if the real controller becomes available or unavailable
-def controller_availability_check():
+# (Your XpressNetController class and other functions remain the same...)
+
+def set_controller(new_controller):
     global controller
-    while True:
-        if is_controller_available():
-            if controller is None:
-                print("Controller detected. Connecting...")
-                controller = XpressNetController('/dev/ttyACM0', 19200, 0.25, response_handler)
-        else:
-            if controller is not None:
-                print("Controller not available. Controller not detected.")
-                controller = None
-        # Send status update when controller status changes
-        asyncio.run(send_status_update())
-        time.sleep(60)  # Check every 60 seconds
+    with controller_lock:
+        controller = new_controller
+
+def get_controller():
+    global controller
+    with controller_lock:
+        return controller
 
 def start_mdns_advertising():
     local_ip = get_local_ip()
@@ -331,14 +246,30 @@ def start_mdns_advertising():
     zeroconf.register_service(info)
     print(f"mDNS service registered: xpressNetControl on {local_ip} ({hostname}.local)")
 
+def controller_availability_check():
+    while True:
+        if is_controller_available():
+            if get_controller() is None:
+                print("Controller detected. Connecting...")
+                set_controller(XpressNetController('/dev/ttyACM0', 19200, 0.25, response_handler))
+        else:
+            if get_controller() is not None:
+                print("Controller not available. Disconnecting...")
+                set_controller(None)
+        # Send status update when controller status changes
+        asyncio.run(send_status_update())
+        time.sleep(60)  # Check every 60 seconds
+
 if __name__ == '__main__':
     # Start mDNS/Bonjour advertising
     start_mdns_advertising()
 
-    # Start HTTP server in a separate thread
-    http_server_thread = threading.Thread(target=start_http_server)
-    http_server_thread.daemon = True
-    http_server_thread.start()
+    # Check if HTTP server is enabled in the config
+    if os.getenv("HTTP_SERVER_ENABLE", "FALSE").upper() == "TRUE":
+        # Start HTTP server in a separate thread
+        http_server_thread = threading.Thread(target=start_http_server, args=(get_controller, get_local_ip()))
+        http_server_thread.daemon = True
+        http_server_thread.start()
 
     availability_check_thread = threading.Thread(target=controller_availability_check)
     availability_check_thread.daemon = True
