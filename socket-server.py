@@ -132,7 +132,6 @@ async def websocket_handler(websocket, path):
     try:
         async for message in websocket:
             data = json.loads(message)
-            print(data)
             action = data.get('action')
 
             if controller is None and action not in ['setAccessoryState', 'getAccessoryState', 'getAccessoryStates']:
