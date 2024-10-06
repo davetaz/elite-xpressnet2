@@ -17,6 +17,7 @@ load_dotenv("config.env")
 controller_lock = threading.Lock()
 controller = None
 connected_clients = set()
+accessory_states = {}  # Dictionary to store accessory states by accessoryID
 
 class XpressNetController:
     def __init__(self, device_path, baud_rate, message_delay, response_handler):
@@ -63,13 +64,13 @@ class XpressNetController:
         train = self.get_train(train_number)
         return train.getState()
 
-    def accessory(self, accessory_number, direction):
+    def setAccessoryDirection(self, accessory_number, direction):
         try:
             accessory = self.get_accessory(accessory_number)
             if direction == "FORWARD":
-                accessory.activateOutput2()
-            elif direction == "REVERSE":
                 accessory.activateOutput1()
+            elif direction == "REVERSE":
+                accessory.activateOutput2()
             else:
                 return {"status_code": 400, "message": "Invalid accessory direction"}
             return {"status_code": 200, "message": "Accessory command sent successfully"}
@@ -123,7 +124,6 @@ async def send_status_update():
     await broadcast_message(response)
 
 async def websocket_handler(websocket, path):
-    print("Client connected")
     connected_clients.add(websocket)
 
     # Send status update when a new client connects
@@ -132,9 +132,10 @@ async def websocket_handler(websocket, path):
     try:
         async for message in websocket:
             data = json.loads(message)
+            print(data)
             action = data.get('action')
 
-            if controller is None:
+            if controller is None and action not in ['setAccessoryState', 'getAccessoryState', 'getAccessoryStates']:
                 await websocket.send(json.dumps({
                     'type': 'error',
                     'message': 'Controller not detected'
@@ -181,12 +182,47 @@ async def websocket_handler(websocket, path):
 
                 controller.function(train_number, function_id, switch)
 
-            elif action == 'accessory':
+            elif action == 'setAccessoryDirection':
                 accessory_number = data['accessory_number']
                 direction = data['direction']
                 print(f'Accessory: Accessory: {accessory_number} | Direction: {direction}')
 
-                controller.accessory(accessory_number, direction)
+                controller.setAccessoryDirection(accessory_number, direction)
+
+            elif action == 'setAccessoryState':
+                accessory_id = data['accessory_id']
+                state = data['state']
+                print(f'Set Accessory State: Accessory ID: {accessory_id} | State: {state}')
+
+                # Store the state and broadcast to all clients
+                accessory_states[accessory_id] = state
+                await broadcast_message({
+                    "message": "accessoryState",
+                    "status_code": 200,
+                    "accessory_id": accessory_id,
+                    "state": state
+                })
+
+            elif action == 'getAccessoryState':
+                accessory_id = data['accessory_id']
+                print(f'Get Accessory State: Accessory ID: {accessory_id}')
+
+                state = accessory_states.get(accessory_id, {})
+                await broadcast_message({
+                    "message": "accessoryState",
+                    "status_code": 200,
+                    "accessory_id": accessory_id,
+                    "state": state
+                })
+
+            elif action == 'getAccessoryStates':
+                print('Get Accessory States')
+                print(accessory_states)
+                await broadcast_message({
+                    "message": "accessoryStates",
+                    "status_code": 200,
+                    "accessories": accessory_states
+                })
 
             elif action == 'controller_status':
                 status = 'online' if is_controller_available() else 'offline'

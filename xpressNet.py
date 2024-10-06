@@ -283,7 +283,6 @@ def process_data():
 #                    response["message"] = "Ready"
                 else:
                     response["status_code"] = 200
-#                    response["message"] = "Command Station Status OK"
 
             # Handle known sequences
             elif chunk[0] == 0x63 and chunk[1] == 0x21 and len(chunk) >= 3:
