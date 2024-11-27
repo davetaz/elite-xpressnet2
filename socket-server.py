@@ -5,11 +5,11 @@ import threading
 import time
 import socket
 import os
+import serial  # Ensure the import is correct for serial communication
 from zeroconf import ServiceInfo, Zeroconf
 from dotenv import load_dotenv
-from http_server import start_http_server  # Import the HTTP server module
-
 import xpressNet
+from http_server import start_http_server  # Import the HTTP server module
 
 # Load environment variables from config.env
 load_dotenv("config.env")
@@ -27,6 +27,10 @@ class XpressNetController:
             self.accessories = {}
         except ImportError:
             raise ImportError("xpressNet library not installed. Please install it to use the real controller.")
+
+    def is_controller_connected(self):
+        """Check if the controller is connected."""
+        return xpressNet.is_controller_connected()
 
     def getStatus(self):
         xpressNet.getStatus()
@@ -86,7 +90,6 @@ class XpressNetController:
 def response_handler(message):
     asyncio.run(broadcast_message(json.loads(message)))
 
-# Check if the real controller is available
 def is_controller_available():
     try:
         xpressNet.connection_open('/dev/ttyACM0', 19200, 0.25, response_handler)
@@ -140,6 +143,13 @@ async def websocket_handler(websocket, path):
                     'message': 'Controller not detected'
                 }))
                 continue
+
+            # Check if the controller is connected
+            if not controller.is_controller_connected():
+                await websocket.send(json.dumps({
+                    'type': 'controller_status',
+                    'status': "offline"
+                }))
 
             if action == 'getControllerStatus':
                 controller.getStatus()
@@ -282,24 +292,33 @@ def start_mdns_advertising():
     print(f"mDNS service registered: xpressNetControl on {local_ip} ({hostname}.local)")
 
 def controller_availability_check():
+    # Call set_controller once at the start
+    if get_controller() is None:
+        print("Setting up controller...")
+        set_controller(XpressNetController('/dev/ttyACM0', 19200, 0.25, response_handler))
+
+    was_connected = False  # Tracks the previous connection state
+
     while True:
-        if is_controller_available():
-            if get_controller() is None:
-                print("Controller detected. Connecting...")
-                set_controller(XpressNetController('/dev/ttyACM0', 19200, 0.25, response_handler))
+        # Periodically check if the controller is connected
+        if get_controller().is_controller_connected():
+            if not was_connected:  # Only print when recovering from a disconnect
+                print("Controller is connected.")
+            was_connected = True  # Update the state
         else:
-            if get_controller() is not None:
-                print("Controller not available. Disconnecting...")
-                set_controller(None)
-        # Send status update when controller status changes
-        asyncio.run(send_status_update())
-        time.sleep(60)  # Check every 60 seconds
+            if was_connected:  # Only print when transitioning to a disconnected state
+                print("Controller is disconnected!")
+            was_connected = False  # Update the state
+            # Handle disconnection logic if needed, e.g., send a status update
+            asyncio.run(send_status_update())
+
+        time.sleep(10)  # Check every 10 seconds
 
 if __name__ == '__main__':
     # Start mDNS/Bonjour advertising
     start_mdns_advertising()
 
-    # Check if HTTP server is enabled in the config
+        # Check if HTTP server is enabled in the config
     if os.getenv("HTTP_SERVER_ENABLE", "FALSE").upper() == "TRUE":
         # Start HTTP server in a separate thread
         http_server_thread = threading.Thread(target=start_http_server, args=(get_controller, get_local_ip()))

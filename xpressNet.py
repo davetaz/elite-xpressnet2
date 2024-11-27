@@ -19,6 +19,12 @@ buffer = bytearray()
 delay_between_commands = 0.25  # Default delay in seconds between commands
 listening = True  # Flag to control the listening thread
 
+connection_device = None
+connection_baud = None
+connection_delay = None
+
+controller_connected = False
+
 # Callback for processed messages
 callback = None
 
@@ -33,13 +39,89 @@ last_requested_train_address = None
 # Global variable to track if the first response has been processed
 first_response_processed = False
 
-# Calculate checksum
-def calculate_checksum(data):
-    return reduce(lambda r, v: r ^ v, data)
+# Listen for incoming serial data
+def listen_serial():
+    global listening
+    while listening:
+        try:
+            receive()
+        except Exception as e:
+            logging.error(f"Error in listen_serial: {e}")
+            time.sleep(5)  # Wait before retrying to avoid spamming logs
 
-# Convert data to hex string for logging
-def to_hex(data):
-    return ''.join(f'{c:02X}' for c in data)
+# Connection management
+def connection_open(device, baud, delay, cb=None):
+    global ser, delay_between_commands, callback, listening, controller_connected
+    global connection_device, connection_baud, connection_delay  # Store the parameters globally
+
+    # Store connection parameters for reuse
+    connection_device = device
+    connection_baud = baud
+    connection_delay = delay
+
+    try:
+        ser = serial.Serial(device, baud)
+        ser.timeout = 1.0  # 1-second timeout for reads
+        delay_between_commands = delay
+        callback = cb  # Set the callback function
+        listening = True
+        generate_function_table()
+
+        print("Controller connected")
+        controller_connected = True
+
+        listen_thread = threading.Thread(target=listen_serial)
+        listen_thread.daemon = True
+        listen_thread.start()
+    except Exception as e:
+        logging.warning(f"Failed to open serial connection: {e}")
+        handle_disconnection()
+
+def connection_close():
+    global ser, listening, controller_connected
+    logging.debug("Closing serial connection")
+    listening = False  # Signal the thread to stop
+    controller_connected = False
+    if ser and ser.is_open:
+        ser.close()
+        ser = None
+
+def handle_disconnection():
+    global ser, listening, controller_connected
+    if controller_connected:
+        controller_connected = False
+        print("Controller disconnected")
+
+    logging.info("Handling disconnection...")
+
+    if ser:
+        try:
+            ser.close()
+        except Exception as e:
+            logging.error(f"Error closing serial port: {e}")
+        ser = None
+
+    # Retry connection in a loop
+    while True:
+        try:
+            time.sleep(5)  # Wait before retrying
+            print("Trying to reconnect")
+            if connection_device and connection_baud and connection_delay is not None:
+                logging.info("Retrying connection...")
+                connection_open(connection_device, connection_baud, connection_delay, callback)
+                logging.info("Reconnected successfully")
+                break
+            else:
+                logging.error("Missing connection parameters, cannot reconnect")
+                break
+        except Exception as e:
+            logging.error(f"Failed to reconnect: {e}")
+            time.sleep(5)  # Wait before retrying
+
+# New method to get the connection status
+def is_controller_connected():
+    global controller_connected
+    return controller_connected
 
 # Send data over serial
 def send(data):
@@ -55,21 +137,35 @@ def send(data):
 
 # Receive data and process buffer
 def receive():
-    global ser, listening
+    global ser, listening, buffer
     while listening:
-        with lock:
-            if ser.in_waiting > 0:
-                try:
+        try:
+            with lock:
+                if ser.in_waiting > 0:
                     data = ser.read(ser.in_waiting)  # Read all available bytes
                     logging.debug(f"Received: {to_hex(data)}")
                     buffer.extend(data)  # Add to the buffer
                     process_data()  # Process the buffer
-                except serial.SerialException as e:
-                    logging.error(f"Serial exception during reception: {e}")
-                    listening = False
-                except OSError as e:
-                    logging.error(f"OSError during reception: {e}")
-                    listening = False
+        except serial.SerialException as e:
+            logging.error(f"Serial exception during reception: {e}")
+            listening = False
+            handle_disconnection()
+        except OSError as e:
+            logging.error(f"OSError during reception: {e}")
+            listening = False
+            handle_disconnection()
+        except Exception as e:
+            logging.error(f"Unexpected exception during reception: {e}")
+            listening = False
+            handle_disconnection()
+
+# Calculate checksum
+def calculate_checksum(data):
+    return reduce(lambda r, v: r ^ v, data)
+
+# Convert data to hex string for logging
+def to_hex(data):
+    return ''.join(f'{c:02X}' for c in data)
 
 def decode_train_number(high_byte, low_byte):
     if high_byte < 0xC0:  # Addresses less than 100
@@ -343,37 +439,6 @@ def process_data():
         else:
             # If there aren't enough bytes yet, wait for more data to arrive
             break
-
-# Listen for incoming serial data
-def listen_serial():
-    receive()
-
-# Connection management
-def connection_open(device, baud, delay, cb=None):
-    global ser, delay_between_commands, callback, listening
-    try:
-        ser = serial.Serial(device, baud)
-        ser.timeout = 1.0  # 1-second timeout for reads
-        delay_between_commands = delay
-        callback = cb  # Set the callback function
-        listening = True
-        generate_function_table()
-
-        logging.debug("Serial connection opened")
-
-        listen_thread = threading.Thread(target=listen_serial)
-        listen_thread.daemon = True
-        listen_thread.start()
-    except Exception as e:
-        logging.error(f"Failed to open serial connection: {e}")
-
-def connection_close():
-    global ser, listening
-    logging.debug("Closing serial connection")
-    listening = False  # Signal the thread to stop
-    if ser and ser.is_open:
-        ser.close()
-        ser = None
 
 # Get version command
 def getVersion():

@@ -1,6 +1,8 @@
 import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
+import threading
+import time
 
 class MyHTTPServer(HTTPServer):
     def __init__(self, server_address, RequestHandlerClass, controller_getter, local_ip):
@@ -15,7 +17,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         local_ip = self.server.local_ip
         websocket_port = 8080
         controller = self.server.get_controller()  # Use the getter function
-        controller_status = "Connected" if controller is not None else "Not Connected"
+        controller_status = self.server.controller_status
 
         response = f"""
         <html>
@@ -114,8 +116,25 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Location', '/')
         self.end_headers()
 
+
+def update_controller_status(server):
+    """Update the controller status every 2 seconds."""
+    while True:
+        controller = server.get_controller()
+        if controller and controller.is_controller_connected():
+            server.controller_status = "Connected"
+        else:
+            server.controller_status = "Not Connected"
+        time.sleep(2)
+
 def start_http_server(controller_getter, local_ip):
     http_port = int(os.getenv("HTTP_SERVER_PORT", 80))
     server = MyHTTPServer(('0.0.0.0', http_port), RequestHandler, controller_getter, local_ip)
+
+     # Start the controller status update thread
+    status_thread = threading.Thread(target=update_controller_status, args=(server,))
+    status_thread.daemon = True  # Daemon thread will exit when the main program exits
+    status_thread.start()
+
     print(f"HTTP server started on port {http_port}")
     server.serve_forever()
