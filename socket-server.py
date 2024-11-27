@@ -137,10 +137,10 @@ async def websocket_handler(websocket, path):
             data = json.loads(message)
             action = data.get('action')
 
-            if controller is None and action not in ['setAccessoryState', 'getAccessoryState', 'getAccessoryStates']:
+            if controller is None:
                 await websocket.send(json.dumps({
-                    'type': 'error',
-                    'message': 'Controller not detected'
+                    'type': 'controller_status',
+                    'status': "offline"
                 }))
                 continue
 
@@ -150,6 +150,7 @@ async def websocket_handler(websocket, path):
                     'type': 'controller_status',
                     'status': "offline"
                 }))
+                continue
 
             if action == 'getControllerStatus':
                 controller.getStatus()
