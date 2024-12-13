@@ -22,6 +22,7 @@ listening = True  # Flag to control the listening thread
 connection_device = None
 connection_baud = None
 connection_delay = None
+callback = None
 
 controller_connected = False
 
@@ -52,12 +53,13 @@ def listen_serial():
 # Connection management
 def connection_open(device, baud, delay, cb=None):
     global ser, delay_between_commands, callback, listening, controller_connected
-    global connection_device, connection_baud, connection_delay  # Store the parameters globally
+    global connection_device, connection_baud, connection_delay, callback  # Store the parameters globally
 
     # Store connection parameters for reuse
     connection_device = device
     connection_baud = baud
     connection_delay = delay
+    callback = cb
 
     try:
         ser = serial.Serial(device, baud)
@@ -87,7 +89,7 @@ def connection_close():
         ser = None
 
 def handle_disconnection():
-    global ser, listening, controller_connected
+    global ser, listening, controller_connected, callback
     if controller_connected:
         controller_connected = False
         print("Controller disconnected")

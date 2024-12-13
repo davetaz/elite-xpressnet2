@@ -115,16 +115,21 @@ def get_local_ip():
 
 # Function to send status updates to all connected clients
 async def send_status_update():
+    controller_connected = False
+    if controller:
+        controller_connected = controller.is_controller_connected()
     response = {
         "status_code": 200,
         "message": "SocketStatus",
         "data": {
             "Ready": True,
             "Clients": len(connected_clients),
-            "Controller_Connected": controller is not None
+            "Controller_Connected": controller_connected
         }
     }
     await broadcast_message(response)
+    if controller_connected:
+        controller.getStatus()
 
 async def websocket_handler(websocket, path):
     connected_clients.add(websocket)
@@ -138,22 +143,17 @@ async def websocket_handler(websocket, path):
             action = data.get('action')
 
             if controller is None:
-                await websocket.send(json.dumps({
-                    'type': 'controller_status',
-                    'status': "offline"
-                }))
+                await send_status_update()
                 continue
 
             # Check if the controller is connected
             if not controller.is_controller_connected():
-                await websocket.send(json.dumps({
-                    'type': 'controller_status',
-                    'status': "offline"
-                }))
+                await send_status_update()
                 continue
 
             if action == 'getControllerStatus':
-                controller.getStatus()
+                await send_status_update()
+                continue
 
             if action == 'getControllerVersion':
                 controller.getVersion()
@@ -293,6 +293,7 @@ def start_mdns_advertising():
     print(f"mDNS service registered: xpressNetControl on {local_ip} ({hostname}.local)")
 
 def controller_availability_check():
+    global controller
     # Call set_controller once at the start
     if get_controller() is None:
         print("Setting up controller...")
@@ -302,7 +303,7 @@ def controller_availability_check():
 
     while True:
         # Periodically check if the controller is connected
-        if get_controller().is_controller_connected():
+        if controller and controller.is_controller_connected():
             if not was_connected:  # Only print when recovering from a disconnect
                 print("Controller is connected.")
             was_connected = True  # Update the state
