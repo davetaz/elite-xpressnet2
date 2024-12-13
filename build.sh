@@ -13,7 +13,7 @@ fi
 
 # Prepare the build directory
 echo "Preparing build directory..."
-rsync -av --exclude='.git' --exclude='.gitignore' --exclude='dist' --exclude='build.sh' --exclude='usr/share/' ./ ./build/
+rsync -av --exclude='.git' --exclude='.gitignore' --exclude='README.md' --exclude='dist' --exclude='build.sh' --exclude='usr/share/' ./ ./build/
 
 # Prepare the changelog
 echo "Preparing changelog..."
