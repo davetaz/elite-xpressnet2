@@ -13,7 +13,7 @@ fi
 
 # Prepare the build directory
 echo "Preparing build directory..."
-rsync -av --exclude='.git' --exclude='.gitignore' --exclude='build.sh' --exclude='usr/share/' ./ ./build/
+rsync -av --exclude='.git' --exclude='.gitignore' --exclude='dist' --exclude='build.sh' --exclude='usr/share/' ./ ./build/
 
 # Prepare the changelog
 echo "Preparing changelog..."
@@ -32,8 +32,9 @@ sudo chown -R root:root ./build
 
 # Build the .deb package
 PACKAGE_NAME="xpressnet-control-${VERSION}.deb"
+rm -f "dist/$PACKAGE_NAME"
 echo "Building .deb package: $PACKAGE_NAME"
-dpkg-deb --build ./build "$PACKAGE_NAME"
+dpkg-deb --build ./build "dist/$PACKAGE_NAME"
 
 # Clean up the build directory
 echo "Cleaning up build directory..."
@@ -42,7 +43,7 @@ sudo rm -rf ./build
 echo "Build complete: $PACKAGE_NAME"
 
 echo "Lintian checking..."
-if lintian "$PACKAGE_NAME"; then
+if lintian "dist/$PACKAGE_NAME"; then
     echo "Lintian check passed: No errors or warnings found. 🎉"
 else
     echo "Lintian found issues. Please review the output above. ⚠️"
