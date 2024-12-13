@@ -1,0 +1,24 @@
+#!/bin/bash
+set -e
+
+# Stop and disable the systemd service
+echo "Stopping and disabling xpressnet-control systemd service..."
+sudo systemctl stop xpressnet-control || true
+sudo systemctl disable xpressnet-control || true
+sudo rm -f /etc/systemd/system/xpressnet-control.service
+sudo systemctl daemon-reload
+
+# Remove udev rules
+echo "Removing udev rules for xpressnet-control..."
+sudo rm -f /lib/udev/rules.d/10-elite.rules
+# Reload udev rules only if udev is running
+if command -v udevadm >/dev/null 2>&1; then
+    echo "Reloading udev rules..."
+    udevadm control --reload-rules
+    udevadm trigger
+else
+    echo "Warning: udevadm not found. Skipping udev reload."
+fi
+
+echo "xpressnet-control removed successfully."
+

@@ -1,0 +1,11 @@
+Package: xpressnet-control
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-serial, python3-dotenv, python3-websockets, python3-zeroconf
+Maintainer: David Tarrant <davetaz@gmail.com>
+Description: Control Hornby Elite with xpressNet on Raspberry Pi
+ This package provides a utility for controlling the Hornby Elite
+ control system using the xpressNet protocol. It includes WebSocket
+ and HTTP interfaces for seamless integration.

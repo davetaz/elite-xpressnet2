@@ -1,0 +1,40 @@
+.\" Manual page for xpressnet-control
+.TH xpressnet-control 1 "December 13, 2024" "1.0.0" "xpressnet-control Manual"
+.SH NAME
+xpressnet-control \- Control Hornby Elite with xpressNet on Raspberry Pi
+.SH SYNOPSIS
+.B xpressnet-control
+.RI [ options ]
+.SH DESCRIPTION
+xpressnet-control is a utility for managing and controlling the Hornby Elite 
+digital command control (DCC) system using the xpressNet protocol. It provides 
+WebSocket and HTTP interfaces for controlling trains and accessories.
+
+The application runs as a systemd service and can be started, stopped, or 
+restarted using standard service management commands.
+
+.SH OPTIONS
+xpressnet-control does not currently support command-line options.
+
+.SH USAGE
+To start the service, run:
+.PP
+.B sudo systemctl start xpressnet-control
+.PP
+To stop the service, run:
+.PP
+.B sudo systemctl stop xpressnet-control
+
+.SH FILES
+.PP
+/etc/xpressnet-control/config.env
+.br
+The main configuration file for xpressnet-control.
+
+.SH SEE ALSO
+.BR systemctl (1),
+.BR udevadm (8)
+
+.SH AUTHOR
+David Tarrant <davetaz@gmail.com>
+

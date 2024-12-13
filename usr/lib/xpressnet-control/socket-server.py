@@ -12,7 +12,8 @@ import xpressNet
 from http_server import start_http_server  # Import the HTTP server module
 
 # Load environment variables from config.env
-load_dotenv("config.env")
+CONFIG_FILE = os.getenv("CONFIG_FILE", "/etc/xpressnet-control/xpressnet-control.conf")
+load_dotenv(CONFIG_FILE)
 
 controller_lock = threading.Lock()
 controller = None

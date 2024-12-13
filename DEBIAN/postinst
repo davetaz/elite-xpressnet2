@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+# Reload udev rules only if udev is running
+if command -v udevadm >/dev/null 2>&1; then
+    echo "Reloading udev rules..."
+    udevadm control --reload-rules
+    udevadm trigger
+else
+    echo "Warning: udevadm not found. Skipping udev reload."
+fi
+
+# Install the systemd service
+echo "Installing xpressnet-control systemd service..."
+cat <<EOL | sudo tee /etc/systemd/system/xpressnet-control.service
+[Unit]
+Description=xpressNet Control Service
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/xpressnet-control
+WorkingDirectory=/usr/lib/xpressnet-control
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Reload and enable the service
+sudo systemctl daemon-reload
+sudo systemctl enable xpressnet-control
+sudo systemctl start xpressnet-control
+
+echo "xpressnet-control installed and service started successfully."
