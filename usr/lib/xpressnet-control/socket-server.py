@@ -71,7 +71,7 @@ class XpressNetController:
 
     def setAccessoryDirection(self, accessory_number, direction):
         try:
-            accessory = self.get_accessory(accessory_number)
+            accessory = self.get_accessory(int(accessory_number))
             if direction == "FORWARD":
                 accessory.activateOutput1()
             elif direction == "REVERSE":
